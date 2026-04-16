@@ -1,22 +1,34 @@
 --!strict
 --!optimize 2
 
-local Tensor = require("./tensor")
+local Linear = require("./nn/linear")
+local Tensor = require("./core/tensor")
 
-local a = Tensor.new(
-	{1, 2, 3,
-	 4, 5, 6},
-	{3, 2}
-)
+local layer = Linear.new(3, 2)
 
-local b = Tensor.new(
-	{10, 20, 30,
-	 40, 50, 60},
-	{3, 2}
-)
+local lr = 0.01
+local trueW = Tensor.randn({3, 2})
 
-print(a + b)
-print(a * b)
+local x = Tensor.randn({4, 3})
+local y = x:matmul(trueW)
 
-print(a)
-print(a:matmul(b:reshape({ 2, 3 })))
+local start = os.clock()
+for step = 1, 100 do
+	-- flushed ref
+	local pred = layer:forward(x)
+
+	local diff = pred - y
+	local loss = (diff ^ 2):mean()
+
+	local grad = diff * (2 / diff.size)
+	layer:zerograd()
+	layer:backward(grad)
+
+	layer.weight:sub(layer.weightGrad * lr)
+	layer.bias:sub(layer.biasGrad * lr)
+
+	if step % 10 == 0 then
+		print("step", step, "loss", loss)
+	end
+end
+print(`{os.clock() - start}ms`)
