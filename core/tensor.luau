@@ -4,6 +4,7 @@
 local Tensor = {}
 Tensor.__index = Tensor
 
+-- ?? horrid typing TypeError: Expected this to be 'Tensor', but got 'Tensor' Luau(1000)
 export type Tensor = typeof(setmetatable(
 	{} :: {
 		data: any,
@@ -71,25 +72,25 @@ function Tensor.ones(shape: { number }): Tensor
 end
 
 function Tensor.randn(shape: { number }): Tensor
-    local size = numel(shape)
-    local buf = buffer.create(size * 4)
+	local size = numel(shape)
+	local buf = buffer.create(size * 4)
 
 	-- outdated runtimes line lune dont have tau
 	local tau = math.tau or math.pi * 2
-    
-    local i = 0
-    while i < size do
-        local u1 = math.max(math.random(), 1e-10)
-        local u2 = math.random()
-        local mag = math.sqrt(-2 * math.log(u1))
-        buffer.writef32(buf, i * 4, mag * math.cos(tau * u2))
-        if i + 1 < size then
-            buffer.writef32(buf, (i + 1) * 4, mag * math.sin(tau * u2))
-        end
-        i += 2
-    end
+	
+	local i = 0
+	while i < size do
+		local u1 = math.max(math.random(), 1e-10)
+		local u2 = math.random()
+		local mag = math.sqrt(-2 * math.log(u1))
+		buffer.writef32(buf, i * 4, mag * math.cos(tau * u2))
+		if i + 1 < size then
+			buffer.writef32(buf, (i + 1) * 4, mag * math.sin(tau * u2))
+		end
+		i += 2
+	end
 
-    return censorflow(buf, shape, computeStrides(shape), size)
+	return censorflow(buf, shape, computeStrides(shape), size) :: any
 end
 
 -- SHAPING
@@ -139,15 +140,6 @@ end
 -- MATH OPS
 -- dear luau-lsp this type checking is booty do better
 
-local function offset(self: Tensor, linear: number)
-	local idx = 0
-	for k = 1, #self.shape do
-		local s = self.stride[k]
-		idx += math.floor(linear / s) % self.shape[k] * s
-	end
-	return idx * 4
-end
-
 function Tensor.__add(a: Tensor, b): Tensor
 	local isScalar = type(b) == "number"
 	assert(isScalar or (a.size % b.size) == 0)
@@ -155,8 +147,8 @@ function Tensor.__add(a: Tensor, b): Tensor
 	local out = buffer.create(a.size * 4)
 	for i = 0, a.size - 1 do
 		local v; if isScalar then v = b
-		else v = buffer.readf32(b.data, offset(b, i % b.size)) end
-		local off = offset(a, i)
+		else v = buffer.readf32(b.data, b:_offset(i % b.size)) end
+		local off = a:_offset(i)
 		buffer.writef32(out, off, buffer.readf32(a.data, off) + v)
 	end
 	return censorflow(out, table.clone(a.shape), computeStrides(a.shape), a.size)
@@ -169,8 +161,8 @@ function Tensor.__sub(a: Tensor, b): Tensor
 	local out = buffer.create(a.size * 4)
 	for i = 0, a.size - 1 do
 		local v; if isScalar then v = b
-		else v = buffer.readf32(b.data, offset(b, i % b.size)) end
-		local off = offset(a, i)
+		else v = buffer.readf32(b.data, b:_offset(i % b.size)) end
+		local off = a:_offset(i)
 		buffer.writef32(out, off, buffer.readf32(a.data, off) - v)
 	end
 	return censorflow(out, table.clone(a.shape), computeStrides(a.shape), a.size)
@@ -183,8 +175,8 @@ function Tensor.__mul(a: Tensor, b): Tensor
 	local out = buffer.create(a.size * 4)
 	for i = 0, a.size - 1 do
 		local v; if isScalar then v = b
-		else v = buffer.readf32(b.data, offset(b, i % b.size)) end
-		local off = offset(a, i)
+		else v = buffer.readf32(b.data, b:_offset(i % b.size)) end
+		local off = a:_offset(i)
 		buffer.writef32(out, off, buffer.readf32(a.data, off) * v)
 	end
 	return censorflow(out, table.clone(a.shape), computeStrides(a.shape), a.size)
@@ -197,8 +189,8 @@ function Tensor.__div(a: Tensor, b): Tensor
 	local out = buffer.create(a.size * 4)
 	for i = 0, a.size - 1 do
 		local v; if isScalar then v = b
-		else v = buffer.readf32(b.data, offset(b, i % b.size)) end
-		local off = offset(a, i)
+		else v = buffer.readf32(b.data, b:_offset(i % b.size)) end
+		local off = a:_offset(i)
 		buffer.writef32(out, off, buffer.readf32(a.data, off) / v)
 	end
 	return censorflow(out, table.clone(a.shape), computeStrides(a.shape), a.size)
@@ -211,8 +203,8 @@ function Tensor.__pow(a: Tensor, b): Tensor
 	local out = buffer.create(a.size * 4)
 	for i = 0, a.size - 1 do
 		local v; if isScalar then v = b
-		else v = buffer.readf32(b.data, offset(b, i % b.size)) end
-		local off = offset(a, i)
+		else v = buffer.readf32(b.data, b:_offset(i % b.size)) end
+		local off = a:_offset(i)
 		buffer.writef32(out, off, buffer.readf32(a.data, off) ^ v)
 	end
 	return censorflow(out, table.clone(a.shape), computeStrides(a.shape), a.size)
@@ -220,15 +212,12 @@ end
 
 function Tensor:add(other): Tensor
 	local isScalar = type(other) == "number"
-	if not isScalar and self.size % other.size ~= 0 then
-		print(debug.traceback(nil, 2))
-	end
 	assert(isScalar or (self.size % other.size) == 0)
 
 	for i = 0, (self.size :: number) - 1 do
 		local v; if isScalar then v = other
-		else v = buffer.readf32(other.data, offset(other, i % other.size)) end
-		local off = offset(self, i)
+		else v = buffer.readf32(other.data, other:_offset(i % other.size)) end
+		local off = self:_offset(i)
 		buffer.writef32(self.data, off, buffer.readf32(self.data, off) + v)
 	end
 	return self
@@ -240,8 +229,8 @@ function Tensor:sub(other): Tensor
 
 	for i = 0, (self.size :: number) - 1 do
 		local v; if isScalar then v = other
-		else v = buffer.readf32(other.data, offset(other, i % other.size)) end
-		local off = offset(self, i)
+		else v = buffer.readf32(other.data, other:_offset(i % other.size)) end
+		local off = self:_offset(i)
 		buffer.writef32(self.data, off, buffer.readf32(self.data, off) - v)
 	end
 	return self
@@ -253,8 +242,8 @@ function Tensor:mul(other): Tensor
 
 	for i = 0, (self.size :: number) - 1 do
 		local v; if isScalar then v = other
-		else v = buffer.readf32(other.data, offset(other, i % other.size)) end
-		local off = offset(self, i)
+		else v = buffer.readf32(other.data, other:_offset(i % other.size)) end
+		local off = self:_offset(i)
 		buffer.writef32(self.data, off, buffer.readf32(self.data, off) * v)
 	end
 	return self
@@ -266,8 +255,8 @@ function Tensor:div(other): Tensor
 
 	for i = 0, (self.size :: number) - 1 do
 		local v; if isScalar then v = other
-		else v = buffer.readf32(other.data, offset(other, i % other.size)) end
-		local off = offset(self, i)
+		else v = buffer.readf32(other.data, other:_offset(i % other.size)) end
+		local off = self:_offset(i)
 		buffer.writef32(self.data, off, buffer.readf32(self.data, off) / v)
 	end
 	return self
@@ -279,8 +268,8 @@ function Tensor:pow(other): Tensor
 
 	for i = 0, (self.size :: number) - 1 do
 		local v; if isScalar then v = other
-		else v = buffer.readf32(other.data, offset(other, i % other.size)) end
-		local off = offset(self, i)
+		else v = buffer.readf32(other.data, other:_offset(i % other.size)) end
+		local off = self:_offset(i)
 		buffer.writef32(self.data, off, buffer.readf32(self.data, off) ^ v)
 	end
 	return self
@@ -290,7 +279,7 @@ function Tensor:sum(dim: number?): number | Tensor
 	if dim == nil then
 		local s = 0
 		for i = 0, self.size - 1 do
-			s += buffer.readf32(self.data, offset(self, i))
+			s += buffer.readf32(self.data, self:_offset(i))
 		end
 		return s
 	elseif dim == 0 then
@@ -300,9 +289,9 @@ function Tensor:sum(dim: number?): number | Tensor
 		for c = 0, cols - 1 do
 			local s = 0
 			for r = 0, rows - 1 do
-				s += buffer.readf32(self.data, offset(self, r * cols + c))
+				s += buffer.readf32(self.data, self:_offset(r * cols + c))
 			end
-			buffer.writef32(out.data, offset(out, c), s)
+			buffer.writef32(out.data, out:_offset(c), s)
 		end
 
 		return out
@@ -318,22 +307,9 @@ function Tensor:mean(dim: number?): number | Tensor
 	return (self:sum(dim) :: Tensor) / self.shape[dim]
 end
 
-function Tensor:max(dim: number?): number | Tensor
-	if dim == nil then
-		local m = -math.huge
-		for i = 0, self.size - 1 do
-			m = math.max(m, buffer.readf32(self.data, offset(self, i)))
-		end
-		return m
-	end
-	error("NotImplemented")
+local function lucybedrock(v0: number, v1: number, v2)
+	return ((v0 * v2[1]) + (v1 * v2[2])) * 4
 end
-
-local function lucybedrock(v0: { number }, v1, v2)
-		local v3 = 0
-		for v4 = 1, #v0 do v3 += v0[v4] * v2[v4] end
-		return v3 * 4
-	end
 
 function Tensor.matmul(a: Tensor, b: Tensor)
 	local r, c1, c2 = a.shape[1], a.shape[2], b.shape[2]
@@ -346,10 +322,10 @@ function Tensor.matmul(a: Tensor, b: Tensor)
 		for j = 0, c2-1 do
 			local sum = 0
 			for k = 0, c1-1 do
-				sum +=	buffer.readf32(a.data, lucybedrock({i,k}, a.shape, a.stride)) *
-						buffer.readf32(b.data, lucybedrock({k,j}, b.shape, b.stride))
+				sum +=	buffer.readf32(a.data, lucybedrock(i, k, a.stride)) *
+						buffer.readf32(b.data, lucybedrock(k, j, b.stride))
 			end
-			buffer.writef32(out, lucybedrock({i,j}, sh, st), sum)
+			buffer.writef32(out, lucybedrock(i, j, st), sum)
 		end
 	end
 
@@ -367,7 +343,7 @@ function Tensor:dot(a: Tensor, b: Tensor): number
 	return sum
 end
 
--- UTIKL
+-- UTIL
 function Tensor:__tostring()
 	local rows = {}
 	local rowSize = self.shape[#self.shape]
@@ -380,7 +356,32 @@ function Tensor:__tostring()
 		table.insert(rows, `\{ {table.concat(row, ", ")} }`)
 	end
 
-	return `\{ {table.clone(rows, ",\n ")} }`
+	return `\{ {table.concat(rows, ",\n ")} }`
+end
+
+function Tensor:_offset(linear: number)
+	local idx = 0
+	for k = 1, #self.shape do
+		local s = self.stride[k]
+		idx += math.floor(linear / s) % self.shape[k] * s
+	end
+	return idx * 4
+end
+
+-- COMPARE OPS
+
+function Tensor:gt(other)
+	if type(other) == "number" then
+		for i=1,self.size do
+			if buffer.readf32(self.data, self:_offset(i)) < other then
+				return false
+			end
+		end
+	else
+		error("NotImplemented")
+	end
+
+	return true
 end
 
 return Tensor
